@@ -60,11 +60,28 @@ pomExtra := (
     </developers>
   )
 
-credentials += Credentials(Path.userHome / ".sbt" / ".credentials")
-publishTo <<= version { (v: String) =>
-  val nexus = "https://oss.sonatype.org/"
-  if (v.trim.endsWith("SNAPSHOT"))
-    Some("snapshots" at nexus + "content/repositories/snapshots")
-  else
-    Some("releases"  at nexus + "service/local/staging/deploy/maven2")
+val props = sys.props
+val user = props.get("user.name").getOrElse("USER")
+val nexus = props.get("sbt.publish.host").orElse(sys.env.get("SBT_PUBLISH_HOST"))
+val repository = props.get("sbt.publish.repo").orElse(sys.env.get("SBT_PUBLISH_REPO"))
+val myM2Resolver = Resolver.file("file",  new File(Path.userHome.absolutePath+"/.m2/repository"))
+
+def publishTarget: Option[Resolver] = nexus match {
+  case Some(host) => repository map { repo =>
+    s"$repo" at s"http://$host/content/repositories/$repo"
+  }
+  case None => Some(myM2Resolver)
+}
+
+def ivyCredentials(resolver: Resolver): Seq[Credentials] = resolver match {
+  case MavenRepository(n, r) =>
+    Seq[Credentials](Credentials(Path.userHome / ".ivy2" / ".credentials" / uri(r).getHost))
+  case _ => Seq[Credentials]()
+}
+
+publishTo := publishTarget
+credentials ++= publishTo.value.fold {
+  Seq[Credentials]()
+} { repository =>
+  ivyCredentials(repository)
 }
