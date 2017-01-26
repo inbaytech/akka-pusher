@@ -15,7 +15,7 @@ import scala.util.{ Success, Failure }
 
 class PusherActor(
     config: Config,
-    private val batchTriggerQueue: Queue[TriggerMessage] = Queue[TriggerMessage]()) extends Actor with PusherJsonSupport {
+    private val batchTriggerQueue: Queue[TriggerMessage] = Queue[TriggerMessage]()) extends Actor with DiagnosticActorLogging with PusherJsonSupport {
 
   // NOTE: Define redundant constructor to avoid an error to create prop without arguments.
   def this() = {
@@ -24,7 +24,7 @@ class PusherActor(
 
   implicit val system = context.system
   implicit val ec: ExecutionContext = system.dispatcher
-  private lazy val logger = LoggerFactory.getLogger(getClass)
+  private implicit val logger = log
 
   val batchSize = config.as[Option[Int]]("pusher.batchSize").getOrElse(10) // Undoc but just in case...
   val batchTrigger = config.as[Option[Boolean]]("pusher.batchTrigger").getOrElse(false)
@@ -43,7 +43,7 @@ class PusherActor(
   logger.debug(s"batchTrigger........ ${batchTrigger}")
   logger.debug(s"batchInterval....... ${batchInterval}")
 
-  val pusher = new PusherClient()
+  private val pusher = PusherClient(config)
 
   override def receive: Receive = PartialFunction { message =>
     val res = message match {
@@ -78,7 +78,7 @@ class PusherActor(
         if (triggers.nonEmpty) {
           pusher.trigger(triggers.map(TriggerMessage.unapply(_).get)).map {
             case Success(_) => // Do Nothing
-            case Failure(e) => logger.warn(e.getMessage)
+            case Failure(e) => logger.warning(e.getMessage)
           }
           if (batchTriggerQueue.nonEmpty)
             self ! BatchTriggerTick()

@@ -1,6 +1,7 @@
 package com.github.dtaniwaki.akka_pusher
 
 import akka.actor.ActorSystem
+import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpMethod
 import akka.http.scaladsl.model.HttpMethods._
@@ -11,22 +12,22 @@ import akka.stream.scaladsl.{ Flow, Sink, Source }
 import com.github.dtaniwaki.akka_pusher.PusherExceptions._
 import com.github.dtaniwaki.akka_pusher.PusherModels._
 import com.github.dtaniwaki.akka_pusher.Utils._
-import com.github.dtaniwaki.akka_pusher.attributes.{ PusherChannelsAttributes, PusherChannelAttributes }
+import com.github.dtaniwaki.akka_pusher.attributes.{ PusherChannelAttributes, PusherChannelsAttributes }
 import com.typesafe.config.{ Config, ConfigFactory }
 import net.ceedubs.ficus.Ficus._
 import akka.http.scaladsl.model.Uri
 import org.joda.time.DateTimeUtils
 import org.slf4j.LoggerFactory
 import spray.json._
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.util.{ Try, Success, Failure }
+import scala.util.{ Failure, Success, Try }
 
-class PusherClient(config: Config = ConfigFactory.load())(implicit val system: ActorSystem = ActorSystem("pusher-client"))
+class PusherClient(config: Config)(implicit system: ActorSystem, logger: LoggingAdapter)
     extends PusherValidator
     with PusherJsonSupport {
-  private lazy val logger = LoggerFactory.getLogger(getClass)
   private val defaultHeaders: List[HttpHeader] = List(headers.`User-Agent`(s"akka-pusher v${getClass.getPackage.getImplementationVersion}"))
 
   val host: String = config.as[Option[String]]("pusher.host").getOrElse("api.pusherapp.com").trim()
@@ -165,8 +166,8 @@ class PusherClient(config: Config = ConfigFactory.load())(implicit val system: A
                 case _                        => Failure(new PusherException(body))
               }
             }
-        case _ =>
-          Future(Failure(new PusherException("Pusher request failed")))
+        case x =>
+          Future(Failure(new PusherException(s"Pusher request failed with $x")))
       }
   }
 
@@ -198,4 +199,14 @@ class PusherClient(config: Config = ConfigFactory.load())(implicit val system: A
   def shutdown(): Unit = {
     Http(system).shutdownAllConnectionPools()
   }
+}
+
+object PusherClient {
+  def apply(): PusherClient = {
+    implicit val system = ActorSystem("pusher-client")
+    implicit val logger = system.log
+    new PusherClient(ConfigFactory.load())
+  }
+  def apply(config: Config)(implicit system: ActorSystem, logger: LoggingAdapter): PusherClient = new PusherClient(config)
+
 }
