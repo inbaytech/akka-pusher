@@ -1,4 +1,4 @@
-organization := "com.github.inbaytech"
+organization := "com.inbaytech"
 
 name := "akka-pusher"
 
@@ -76,7 +76,7 @@ def publishTarget: Option[Resolver] = nexus match {
 
 def ivyCredentials(resolver: Resolver): Seq[Credentials] = resolver match {
   case MavenRepository(n, r) =>
-    Seq[Credentials](Credentials(Path.userHome / ".ivy2" / ".credentials" / uri(r).getHost))
+    Seq[Credentials](Credentials(Path.userHome / ".ivy2" / "credentials" / uri(r).getHost))
   case _ => Seq[Credentials]()
 }
 
