@@ -45,57 +45,64 @@ class PusherActor(
 
   private val pusher = PusherClient(config)
 
-  override def receive: Receive = PartialFunction { message =>
-    val res = message match {
-      case trigger: TriggerMessage if batchTrigger =>
-        batchTriggerQueue.enqueue(trigger)
-        true
-      case triggers: Seq[_] if batchTrigger && triggers.forall(_.isInstanceOf[TriggerMessage]) =>
-        batchTriggerQueue.enqueue(triggers.map(_.asInstanceOf[TriggerMessage]): _*)
-        true
-      case TriggerMessage(channel, event, message, socketId) =>
-        pusher.trigger(channel, event, message, socketId)
-      case triggers: Seq[_] if triggers.forall(_.isInstanceOf[TriggerMessage]) =>
-        Future.sequence(triggers.map(_.asInstanceOf[TriggerMessage]).grouped(batchSize).map { triggers =>
-          pusher.trigger(triggers.map(TriggerMessage.unapply(_).get))
-        })
-      case ChannelMessage(channel, attributes) =>
-        pusher.channel(channel, attributes)
-      case ChannelsMessage(prefixFilter, attributes) =>
-        pusher.channels(prefixFilter, attributes)
-      case UsersMessage(channel) =>
-        pusher.users(channel)
-      case AuthenticateMessage(channel, socketId, data) =>
-        pusher.authenticate(channel, socketId, data)
-      case ValidateSignatureMessage(key, signature, body) =>
-        pusher.validateSignature(key, signature, body)
-      case trigger: BatchTriggerMessage if batchTrigger =>
-        batchTriggerQueue.enqueue(TriggerMessage.tupled(BatchTriggerMessage.unapply(trigger).get))
-        true
-      case BatchTriggerTick() if batchTrigger =>
-        var n = 0
-        val triggers = batchTriggerQueue.dequeueAll { _ => n += 1; n <= batchSize }
-        if (triggers.nonEmpty) {
-          pusher.trigger(triggers.map(TriggerMessage.unapply(_).get)).map {
-            case Success(_) => // Do Nothing
-            case Failure(e) => logger.warning(e.getMessage)
-          }
-          if (batchTriggerQueue.nonEmpty)
-            self ! BatchTriggerTick()
+  val messageHandler: PartialFunction[Any, Any] = {
+    case trigger: TriggerMessage if batchTrigger =>
+      batchTriggerQueue.enqueue(trigger)
+      true
+    case triggers: Seq[_] if batchTrigger && triggers.forall(_.isInstanceOf[TriggerMessage]) =>
+      batchTriggerQueue.enqueue(triggers.map(_.asInstanceOf[TriggerMessage]): _*)
+      true
+    case TriggerMessage(channel, event, message, socketId) =>
+      pusher.trigger(channel, event, message, socketId)
+    case triggers: Seq[_] if triggers.forall(_.isInstanceOf[TriggerMessage]) =>
+      Future.sequence(triggers.map(_.asInstanceOf[TriggerMessage]).grouped(batchSize).map { triggers =>
+        pusher.trigger(triggers.map(TriggerMessage.unapply(_).get))
+      })
+    case ChannelMessage(channel, attributes) =>
+      pusher.channel(channel, attributes)
+    case ChannelsMessage(prefixFilter, attributes) =>
+      pusher.channels(prefixFilter, attributes)
+    case UsersMessage(channel) =>
+      pusher.users(channel)
+    case AuthenticateMessage(channel, socketId, data) =>
+      pusher.authenticate(channel, socketId, data)
+    case ValidateSignatureMessage(key, signature, body) =>
+      pusher.validateSignature(key, signature, body)
+    case trigger: BatchTriggerMessage if batchTrigger =>
+      batchTriggerQueue.enqueue(TriggerMessage.tupled(BatchTriggerMessage.unapply(trigger).get))
+      true
+    case BatchTriggerTick() if batchTrigger =>
+      var n = 0
+      val triggers = batchTriggerQueue.dequeueAll { _ => n += 1; n <= batchSize }
+      if (triggers.nonEmpty) {
+        pusher.trigger(triggers.map(TriggerMessage.unapply(_).get)).map {
+          case Success(_) => // Do Nothing
+          case Failure(e) => logger.warning(e.getMessage)
         }
-        triggers.length
-      case _ =>
-    }
+        if (batchTriggerQueue.nonEmpty) {
+          self ! BatchTriggerTick()
+        }
+      }
+      triggers.length
+    case _ =>
+  }
+
+  def reply(res: Any): Unit = {
     if (!sender.eq(system.deadLetters) && !sender.eq(ActorRef.noSender)) {
       res match {
         case future: Future[_] =>
           future pipeTo sender
         case res if !res.isInstanceOf[Unit] =>
           sender ! res
-        case _ =>
       }
     }
   }
+
+  val resultHandler: PartialFunction[Any, Unit] = {
+    case x => reply(x)
+  }
+
+  override def receive: Receive = messageHandler.andThen(resultHandler)
 
   override def postStop(): Unit = {
     if (batchTrigger) {

@@ -1,6 +1,6 @@
 package com.github.dtaniwaki.akka_pusher
 
-import akka.actor.ActorSystem
+import akka.actor._
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpMethod
@@ -8,7 +8,6 @@ import akka.http.scaladsl.model.HttpMethods._
 import akka.http.scaladsl.model.MediaTypes._
 import akka.http.scaladsl.model._
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{ Flow, Sink, Source }
 import com.github.dtaniwaki.akka_pusher.PusherExceptions._
 import com.github.dtaniwaki.akka_pusher.PusherModels._
 import com.github.dtaniwaki.akka_pusher.Utils._
@@ -41,13 +40,15 @@ class PusherClient(config: Config)(implicit system: ActorSystem, logger: Logging
   logger.debug("secret....... <masked>")
   logger.debug(s"ssl.......... ${ssl}")
 
-  implicit val materializer = ActorMaterializer()(system)
+  val http = Http()(system)
+
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
   implicit val ec: ExecutionContext = system.dispatcher
-  protected val pool: Flow[(HttpRequest, Int), (Try[HttpResponse], Int), Any] = if (ssl) {
-    Http(system).cachedHostConnectionPoolHttps[Int](host)
-  } else {
-    Http(system).cachedHostConnectionPool[Int](host)
-  }
+  //  protected val pool: Flow[(HttpRequest, Int), (Try[HttpResponse], Int), Any] = if (ssl) {
+  //    Http(system).cachedHostConnectionPoolHttps[Int](host)
+  //  } else {
+  //    Http(system).cachedHostConnectionPool[Int](host)
+  //  }
   private val scheme = if (ssl) {
     "https"
   } else {
@@ -138,7 +139,7 @@ class PusherClient(config: Config)(implicit system: ActorSystem, logger: Logging
     request(method = GET, uri = uri.toString).map(_.map(_.parseJson.convertTo[UserList]))
   }
 
-  def authenticate[T: JsonFormat](channel: String, socketId: String, data: Option[ChannelData[T]] = Option.empty[ChannelData[String]]): AuthenticatedParams = {
+  def authenticate[T: JsonFormat](channel: String, socketId: String, data: Option[ChannelData[T]] = Option.empty[ChannelData[T]]): AuthenticatedParams = {
     val serializedData = data.map(_.toJson.compactPrint)
     val signingStrings = serializedData.foldLeft(List(socketId, channel))(_ :+ _)
     AuthenticatedParams(s"$key:${signature(signingStrings.mkString(":"))}", serializedData)
@@ -149,25 +150,18 @@ class PusherClient(config: Config)(implicit system: ActorSystem, logger: Logging
   }
 
   private def request(method: HttpMethod, uri: String, entity: RequestEntity = HttpEntity.Empty): Future[Try[String]] = {
-    Source.single(HttpRequest(method = method, uri = uri, entity = entity, headers = defaultHeaders), 0)
-      .via(pool)
-      .runWith(Sink.head)
-      .flatMap {
-        case (Success(response), _) =>
-          response.entity.withContentType(ContentTypes.`application/json`)
-            .toStrict(5 seconds)
-            .map(_.data.decodeString(response.entity.contentType.charsetOption.map(_.value).getOrElse("UTF8")))
-            .map { body =>
-              response.status match {
-                case StatusCodes.OK           => Success(body)
-                case StatusCodes.BadRequest   => Failure(new BadRequest(body))
-                case StatusCodes.Unauthorized => Failure(new Unauthorized(body))
-                case StatusCodes.Forbidden    => Failure(new Forbidden(body))
-                case _                        => Failure(new PusherException(body))
-              }
-            }
-        case x =>
-          Future(Failure(new PusherException(s"Pusher request failed with $x")))
+    http.singleRequest(HttpRequest(method = method, uri = uri, entity = entity, headers = defaultHeaders))
+      .flatMap { response =>
+        response.entity.withContentType(ContentTypes.`application/json`).toStrict(5.seconds).map { entity =>
+          val body = entity.data.decodeString(entity.contentType.charsetOption.map(_.value).getOrElse("UTF8"))
+          response.status match {
+            case StatusCodes.OK           => Success(body)
+            case StatusCodes.BadRequest   => Failure(new BadRequest(body))
+            case StatusCodes.Unauthorized => Failure(new Unauthorized(body))
+            case StatusCodes.Forbidden    => Failure(new Forbidden(body))
+            case _                        => Failure(new PusherException(body))
+          }
+        }
       }
   }
 

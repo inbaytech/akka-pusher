@@ -2,23 +2,24 @@ organization := "com.github.inbaytech"
 
 name := "akka-pusher"
 
-scalaVersion := "2.11.8"
-crossScalaVersions := Seq("2.11.8")
+scalaVersion := "2.12.8"
+crossScalaVersions := Seq("2.12.8", "2.13.0")
 
 scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked")
 
-val akkaV      = "2.4.16"
-val akkaHttpV  = "10.0.2"
-val sprayJsonV = "1.3.2"
-val specs2V    = "3.6.4"
+val akkaV      = "2.5.23"
+val akkaHttpV  = "10.1.8"
+val sprayJsonV = "1.3.4"
+val specs2V    = "4.3.6"
 
 val developmentDependencies = Seq(
   "com.typesafe.akka"       %%  "akka-actor"                        % akkaV,
-  "com.typesafe.akka"       %%  "akka-http-core"                    % akkaHttpV,
+  "com.typesafe.akka"       %%  "akka-stream"                       % akkaV,
+  "com.typesafe.akka"       %%  "akka-http"                         % akkaHttpV,
   "io.spray"                %% "spray-json"                         % sprayJsonV,
-  "com.github.nscala-time"  %%  "nscala-time"                       % "2.2.0",
+  "com.github.nscala-time"  %%  "nscala-time"                       % "2.20.0",
   "org.slf4j"               %   "slf4j-api"                         % "1.7.19",
-  "net.ceedubs"             %%  "ficus"                             % "1.1.2"
+  "com.iheart"              %%  "ficus"                             % "1.4.4"
 )
 val testDependencies = Seq(
   "com.typesafe.akka"   %%  "akka-testkit"  % akkaV % "test",
